@@ -1,0 +1,38 @@
+# Version control
+.git
+.gitignore
+
+# Python cache
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+
+# Development artifacts
+.env
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+
+# Runtime data — never bake into image, belongs on the volume
+*.db
+*.db-wal
+*.db-shm
+lastseqno.txt
+*.log
+
+# Local config override — injected at runtime via volume mount
+config.yaml
+
+# Docs and non-app files — not needed in the image
+README.md
+LICENSE
+systemd/
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,28 @@
+# pskr-mqtt-cache configuration
+# Copy to config.yaml and adjust as needed.
+
+mqtt:
+  host: mqtt.pskreporter.info
+  port: 1883           # 1883=plain, 1884=TLS, 1885=WS, 1886=WS+TLS
+  tls: false
+  topic: "pskr/filter/v2/#"   # full firehose
+  client_id: "pskr-mqtt-cache"
+  keepalive: 60
+  reconnect_delay: 5   # seconds between reconnect attempts
+
+database:
+  path: /data/spots.db
+  max_age_hours: 24
+  prune_interval_minutes: 5
+  # WAL mode is always enabled for concurrent read/write performance
+  cache_size_mb: 64
+
+api:
+  host: 0.0.0.0
+  port: 5000
+  # Optional API key — leave blank to disable auth
+  api_key: ""
+
+logging:
+  level: INFO    # DEBUG, INFO, WARNING, ERROR
+
