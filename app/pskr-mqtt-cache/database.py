@@ -91,6 +91,10 @@ class SpotDatabase:
         # Index on t for pruning and maxage filtering
         db.execute("CREATE INDEX IF NOT EXISTS idx_t ON spots(t)")
 
+        # Indexes for callsign queries
+        db.execute("CREATE INDEX IF NOT EXISTS idx_r_call ON spots(r_call)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_s_call ON spots(s_call)")
+
         db.commit()
 
     def insert_spot(self, spot: dict) -> bool:
@@ -185,12 +189,16 @@ class SpotDatabase:
             log.error("Prune error: %s", exc)
             return 0
 
-    def query_spots(self, bygrid: str = "", ofgrid: str = "", maxage: int = 900) -> list[tuple]:
+    def query_spots(self, bygrid: str = "", ofgrid: str = "",
+                    bycall: str = "", ofcall: str = "",
+                    maxage: int = 900) -> list[tuple]:
         """
-        Query spots by grid prefix and maxage.
+        Query spots by grid prefix, callsign, and maxage.
 
         bygrid  — sender grid prefix (s_grid LIKE 'XX00%')
         ofgrid  — receiver grid prefix (r_grid LIKE 'XX00%')
+        bycall  — sender callsign exact match (s_call = ?)
+        ofcall  — receiver callsign exact match (r_call = ?)
         maxage  — seconds back from now
 
         Returns list of tuples: (t, s_grid, s_call, r_grid, r_call, mode, freq, snr)
@@ -211,6 +219,14 @@ class SpotDatabase:
         if ofgrid:
             sql += " AND r_grid LIKE ?"
             params.append(ofgrid.upper() + "%")
+
+        if bycall:
+            sql += " AND s_call = ?"
+            params.append(bycall.upper())
+
+        if ofcall:
+            sql += " AND r_call = ?"
+            params.append(ofcall.upper())
 
         sql += " ORDER BY t DESC"
 

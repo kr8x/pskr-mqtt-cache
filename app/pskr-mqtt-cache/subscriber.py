@@ -12,6 +12,7 @@ import time
 import logging
 import threading
 
+import uuid
 import paho.mqtt.client as mqtt
 
 from .config import MQTTConfig
@@ -49,8 +50,10 @@ class SpotSubscriber:
 
     def _on_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         self._connected = False
-        if rc != 0:
-            log.warning("MQTT disconnected unexpectedly (rc=%d) — will reconnect.", rc)
+        # paho-mqtt v2 may pass rc as None or a ReasonCode object
+        rc_val = int(rc) if rc is not None and isinstance(rc, int) else 0
+        if rc_val != 0 or rc is None:
+            log.warning("MQTT disconnected unexpectedly — will reconnect. (rc=%s)", rc)
         else:
             log.info("MQTT disconnected cleanly.")
 
@@ -81,9 +84,11 @@ class SpotSubscriber:
     def _run(self):
         """Main subscriber loop — runs in its own thread."""
         while self._running:
+            # Append unique suffix to avoid duplicate client ID kicks from broker
+            client_id = f"{self.cfg.client_id}-{uuid.uuid4().hex[:8]}"
             client = mqtt.Client(
-                client_id=self.cfg.client_id,
-                protocol=mqtt.MQTTv5,
+                client_id=client_id,
+                protocol=mqtt.MQTTv311,
             )
             client.on_connect    = self._on_connect
             client.on_disconnect = self._on_disconnect

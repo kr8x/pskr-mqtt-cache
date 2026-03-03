@@ -65,28 +65,36 @@ def valid_grid(g: str) -> bool:
     return bool(GRID_RE.match(g))
 
 
+CALL_RE = re.compile(r'^[A-Z0-9/]{3,15}$')
+
+def valid_call(c: str) -> bool:
+    return bool(CALL_RE.match(c))
+
+
 @app.get(
     "/spots",
     response_class=PlainTextResponse,
-    summary="Query spots by grid prefix and age",
+    summary="Query spots by grid prefix, callsign, and age",
     description="""
 Returns spots in HamClock wire format (CSV, one spot per line):
 
     flowStartSeconds,senderLocator,senderCallsign,receiverLocator,receiverCallsign,mode,frequency,sNR
 
-At least one of `bygrid` or `ofgrid` must be provided.
+At least one of `bygrid`, `ofgrid`, `bycall`, or `ofcall` must be provided.
     """,
 )
 def get_spots(
     request: Request,
     bygrid: Optional[str] = Query(default=None, description="Sender grid prefix (e.g. EL97 or EL97ab)"),
     ofgrid: Optional[str] = Query(default=None, description="Receiver grid prefix (e.g. EL97 or EL97ab)"),
+    bycall: Optional[str] = Query(default=None, description="Sender callsign (exact match, e.g. W4BLD)"),
+    ofcall: Optional[str] = Query(default=None, description="Receiver callsign (exact match, e.g. KO4AQF)"),
     maxage: int           = Query(default=900, ge=60, le=86400, description="Seconds back from now (60–86400)"),
     db: SpotDatabase      = Depends(get_db),
     _auth                 = Depends(check_api_key),
 ):
-    if not bygrid and not ofgrid:
-        raise HTTPException(status_code=400, detail="bygrid and/or ofgrid parameter is required")
+    if not bygrid and not ofgrid and not bycall and not ofcall:
+        raise HTTPException(status_code=400, detail="At least one of bygrid, ofgrid, bycall, or ofcall is required")
 
     if bygrid and not valid_grid(bygrid):
         raise HTTPException(status_code=400, detail=f"Invalid bygrid locator: {bygrid}")
@@ -94,9 +102,21 @@ def get_spots(
     if ofgrid and not valid_grid(ofgrid):
         raise HTTPException(status_code=400, detail=f"Invalid ofgrid locator: {ofgrid}")
 
+    if bycall:
+        bycall = bycall.upper()
+        if not valid_call(bycall):
+            raise HTTPException(status_code=400, detail=f"Invalid bycall: {bycall}")
+
+    if ofcall:
+        ofcall = ofcall.upper()
+        if not valid_call(ofcall):
+            raise HTTPException(status_code=400, detail=f"Invalid ofcall: {ofcall}")
+
     rows = db.query_spots(
         bygrid=bygrid or "",
         ofgrid=ofgrid or "",
+        bycall=bycall or "",
+        ofcall=ofcall or "",
         maxage=maxage,
     )
 
