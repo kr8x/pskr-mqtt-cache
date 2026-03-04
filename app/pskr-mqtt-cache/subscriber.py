@@ -4,6 +4,11 @@ subscriber.py — MQTT subscriber for pskr-mqtt-cache.
 Connects to mqtt.pskreporter.info, subscribes to the full spot firehose,
 parses JSON payloads, and inserts spots into the SQLite database.
 
+Spots are accumulated in an in-memory batch and flushed to SQLite every
+FLUSH_INTERVAL seconds or when the batch reaches FLUSH_SIZE spots —
+whichever comes first. This dramatically reduces disk IO compared to
+committing every spot individually.
+
 Runs in its own thread. Reconnects automatically on disconnect.
 """
 
@@ -20,6 +25,9 @@ from .database import SpotDatabase
 
 log = logging.getLogger(__name__)
 
+FLUSH_INTERVAL = 15    # seconds between batch flushes
+FLUSH_SIZE     = 5000  # flush early if batch reaches this size
+
 
 class SpotSubscriber:
     def __init__(self, cfg: MQTTConfig, db: SpotDatabase):
@@ -29,6 +37,11 @@ class SpotSubscriber:
         self._connected   = False
         self._running     = False
         self._thread      = None
+
+        # In-memory batch — MQTT callback appends here, flush thread drains it
+        self._batch       = []
+        self._batch_lock  = threading.Lock()
+        self._flush_thread = None
 
         # Stats
         self.spots_received  = 0
@@ -40,7 +53,7 @@ class SpotSubscriber:
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
-            self._connected  = True
+            self._connected   = True
             self.connect_time = time.time()
             log.info("Connected to MQTT broker %s:%d", self.cfg.host, self.cfg.port)
             client.subscribe(self.cfg.topic)
@@ -50,7 +63,6 @@ class SpotSubscriber:
 
     def _on_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         self._connected = False
-        # paho-mqtt v2 may pass rc as None or a ReasonCode object
         rc_val = int(rc) if rc is not None and isinstance(rc, int) else 0
         if rc_val != 0 or rc is None:
             log.warning("MQTT disconnected unexpectedly — will reconnect. (rc=%s)", rc)
@@ -67,24 +79,54 @@ class SpotSubscriber:
         self.spots_received += 1
         self.last_spot_time  = time.time()
 
-        # Skip spots with no locator — useless for grid-based filtering
+        # Skip spots missing both grids — HamClock requires at least one
         if not spot.get("sl") and not spot.get("rl"):
             return
 
-        if self.db.insert_spot(spot):
-            self.spots_inserted += 1
+        # Append to batch — lock is brief (list append is O(1))
+        with self._batch_lock:
+            self._batch.append(spot)
+            batch_size = len(self._batch)
+
+        # Flush early if batch is large enough
+        if batch_size >= FLUSH_SIZE:
+            self._flush()
 
         # Periodic stats log
         if self.spots_received % 10000 == 0:
             log.info("Stats: received=%d inserted=%d db_total=%d",
                      self.spots_received, self.spots_inserted, self.db.count())
 
+    # ── Batch Flush ───────────────────────────────────────────────────────────
+
+    def _flush(self):
+        """Drain the batch and write to SQLite."""
+        with self._batch_lock:
+            if not self._batch:
+                return
+            batch = self._batch
+            self._batch = []
+
+        inserted = self.db.insert_batch(batch)
+        self.spots_inserted += inserted
+
+    def _flush_loop(self):
+        """Background thread that flushes the batch every FLUSH_INTERVAL seconds."""
+        log.info("Flush thread started (interval=%ds, max_batch=%d)",
+                 FLUSH_INTERVAL, FLUSH_SIZE)
+        while self._running:
+            time.sleep(FLUSH_INTERVAL)
+            if self._running:
+                self._flush()
+        # Final flush on shutdown
+        self._flush()
+        log.info("Flush thread stopped.")
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def _run(self):
         """Main subscriber loop — runs in its own thread."""
         while self._running:
-            # Append unique suffix to avoid duplicate client ID kicks from broker
             client_id = f"{self.cfg.client_id}-{uuid.uuid4().hex[:8]}"
             client = mqtt.Client(
                 client_id=client_id,
@@ -111,14 +153,21 @@ class SpotSubscriber:
         log.info("Subscriber stopped.")
 
     def start(self):
-        """Start the subscriber in a background thread."""
+        """Start the subscriber and flush threads."""
         self._running = True
-        self._thread  = threading.Thread(target=self._run, name="mqtt-subscriber", daemon=True)
+
+        self._flush_thread = threading.Thread(
+            target=self._flush_loop, name="batch-flush", daemon=True)
+        self._flush_thread.start()
+
+        self._thread = threading.Thread(
+            target=self._run, name="mqtt-subscriber", daemon=True)
         self._thread.start()
+
         log.info("MQTT subscriber thread started.")
 
     def stop(self):
-        """Signal the subscriber to stop."""
+        """Signal threads to stop."""
         self._running = False
         log.info("MQTT subscriber stopping …")
 

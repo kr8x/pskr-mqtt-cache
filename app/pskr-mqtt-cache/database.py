@@ -18,6 +18,8 @@ from .config import DatabaseConfig
 log = logging.getLogger(__name__)
 
 
+
+
 class SpotDatabase:
     def __init__(self, cfg: DatabaseConfig):
         self.path = cfg.path
@@ -69,6 +71,10 @@ class SpotDatabase:
             raise
 
     def _init_schema(self, db: sqlite3.Connection):
+        # Enable incremental auto_vacuum so freed pages can be reclaimed
+        # without a full VACUUM. Must be set before table creation to take effect
+        # on new databases. Existing databases require one offline VACUUM first.
+        db.execute("PRAGMA auto_vacuum=INCREMENTAL")
         db.execute("""
             CREATE TABLE IF NOT EXISTS spots (
                 sq      INTEGER,                -- PSKReporter sequence number (may be absent)
@@ -116,6 +122,7 @@ class SpotDatabase:
             snr  = spot.get("rp")
             sl   = spot.get("sl") or ""
             rl   = spot.get("rl") or ""
+            mode = spot.get("md") or ""
 
             with self._conn() as db:
                 cur = db.execute("""
@@ -129,7 +136,7 @@ class SpotDatabase:
                     spot.get("sc") or "",
                     rl[:6].upper(),
                     spot.get("rc") or "",
-                    spot.get("md") or "",
+                    mode,
                     int(freq) if freq is not None else 0,
                     int(snr)  if snr  is not None else 0,
                 ))
@@ -149,20 +156,27 @@ class SpotDatabase:
         rows = []
         for spot in spots:
             try:
-                sq = spot.get("sq")
-                t = spot.get("t_tx") or spot.get("t")
+                sq   = spot.get("sq")
+                t    = spot.get("t_tx") or spot.get("t")
+                if t is None:
+                    continue
+                mode = spot.get("md") or ""
+                freq = spot.get("f")
+                snr  = spot.get("rp")
+                sl   = spot.get("sl") or ""
+                rl   = spot.get("rl") or ""
                 rows.append((
-                    int(sq) if sq is not None else None,
+                    int(sq)   if sq   is not None else None,
                     int(t),
-                    spot.get("sl", "")[:6].upper(),
-                    spot.get("sc", ""),
-                    spot.get("rl", "")[:6].upper(),
-                    spot.get("rc", ""),
-                    spot.get("md", ""),
-                    int(spot.get("f", 0)),
-                    int(spot.get("rp", 0)),
+                    sl[:6].upper(),
+                    spot.get("sc") or "",
+                    rl[:6].upper(),
+                    spot.get("rc") or "",
+                    mode,
+                    int(freq) if freq is not None else 0,
+                    int(snr)  if snr  is not None else 0,
                 ))
-            except (KeyError, ValueError):
+            except (KeyError, ValueError, TypeError):
                 continue
 
         try:
@@ -252,6 +266,16 @@ class SpotDatabase:
         except Exception as exc:
             log.error("Query error: %s", exc)
             return []
+
+    def incremental_vacuum(self, pages: int = 1000) -> None:
+        """Reclaim up to `pages` freed pages from the database file.
+        Called after pruning to gradually shrink the file without downtime."""
+        try:
+            with self._conn() as db:
+                db.execute(f"PRAGMA incremental_vacuum({pages})")
+                db.commit()
+        except Exception as exc:
+            log.error("Incremental vacuum error: %s", exc)
 
     def count(self) -> int:
         try:
