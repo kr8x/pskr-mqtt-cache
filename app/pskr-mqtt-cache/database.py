@@ -74,6 +74,10 @@ class SpotDatabase:
         # Enable incremental auto_vacuum so freed pages can be reclaimed
         # without a full VACUUM. Must be set before table creation to take effect
         # on new databases. Existing databases require one offline VACUUM first.
+        db.execute("PRAGMA auto_vacuum = INCREMENTAL")
+        db.execute("VACUUM")
+        db.commit()
+
         db.execute("""
             CREATE TABLE IF NOT EXISTS spots (
                 sq      INTEGER,                -- PSKReporter sequence number (may be absent)
@@ -88,7 +92,6 @@ class SpotDatabase:
                 PRIMARY KEY (t, s_call, r_call, freq)
             )
         """)
-        db.execute("PRAGMA auto_vacuum = INCREMENTAL")
 
         # Indexes for the two HamClock query patterns
         db.execute("CREATE INDEX IF NOT EXISTS idx_r_grid ON spots(r_grid)")
@@ -280,8 +283,14 @@ class SpotDatabase:
         Called after pruning to gradually shrink the file without downtime."""
         try:
             with self._conn() as db:
-                db.execute(f"PRAGMA incremental_vacuum({pages})")
+                before = db.execute("PRAGMA freelist_count").fetchone()[0]
+                db.execute("PRAGMA incremental_vacuum")
                 db.commit()
+                after = db.execute("PRAGMA freelist_count").fetchone()[0]
+                pages_recovered = before - after
+                kb_recovered = (pages_recovered * 4096) / 1024
+                print(f"Cleaned {pages_recovered} pages (~{kb_recovered} KB); Remaining: {after}")
+
         except Exception as exc:
             log.error("Incremental vacuum error: %s", exc)
 
