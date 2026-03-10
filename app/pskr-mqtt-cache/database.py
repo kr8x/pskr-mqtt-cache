@@ -234,7 +234,8 @@ class SpotDatabase:
                     # ensuring the checkpoint runs. This is critical for moving deleted
                     # pages from the WAL to the main DB freelist so that
                     # incremental_vacuum can reclaim the space. It does not block readers.
-                    res = db.execute("PRAGMA wal_checkpoint(FULL)").fetchone()
+                    # We'll use NORMAL to be less aggressive but still make some happen
+                    res = db.execute("PRAGMA wal_checkpoint(NORMAL)").fetchone()
                     if res and res[2] > 0:
                         log.info("Checkpointed %d pages from WAL to main database.", res[2])
                     else:
@@ -307,13 +308,15 @@ class SpotDatabase:
                 original_isolation_level = db.isolation_level
                 db.isolation_level = None
                 try:
-                    # We must consume the result for the pragma to execute.
-                    # When pages is 0 (the default), we want to vacuum all free pages.
-                    # This is achieved by omitting the argument to the pragma, as
-                    # `PRAGMA incremental_vacuum(0)` would vacuum zero pages.
-                    vacuum_sql = "PRAGMA incremental_vacuum"
-                    if pages > 0:
-                        vacuum_sql += f"({pages})"
+                    # When pages is 0 (the default), it would vacuum all
+                    # free pages. But we know it's just going to create more
+                    # so let's just vacuum half.
+                    if pages == 0:
+                        some_pages = before/2 # less aggressively clean
+                        vacuum_sql = f"PRAGMA incremental_vacuum({some_pages})"
+                    else:
+                        vacuum_sql = f"PRAGMA incremental_vacuum({pages})"
+
                     # We must consume all results for the pragma to run to completion.
                     # fetchone() may cause it to stop after processing a small number
                     # of pages. fetchall() ensures the entire freelist is processed.
