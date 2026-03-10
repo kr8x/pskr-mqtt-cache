@@ -57,6 +57,9 @@ class SpotDatabase:
         # Allow readers to proceed even during writes
         db.execute("PRAGMA read_uncommitted=0")
 
+        # Force the WAL to truncate to 4MB after a successful checkpoint
+        db.execute("PRAGMA journal_size_limit = 4194304")
+
         return db
 
     @contextmanager
@@ -71,10 +74,6 @@ class SpotDatabase:
             raise
 
     def _init_schema(self, db: sqlite3.Connection):
-        # Enable incremental auto_vacuum so freed pages can be reclaimed
-        # without a full VACUUM. Must be set before table creation to take effect
-        # on new databases. Existing databases require one offline VACUUM first.
-        db.execute("PRAGMA auto_vacuum=INCREMENTAL")
         db.execute("""
             CREATE TABLE IF NOT EXISTS spots (
                 sq      INTEGER,                -- PSKReporter sequence number (may be absent)
@@ -101,6 +100,13 @@ class SpotDatabase:
         db.execute("CREATE INDEX IF NOT EXISTS idx_r_call ON spots(r_call)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_s_call ON spots(s_call)")
 
+        db.commit()
+
+        # Enable incremental auto_vacuum so freed pages can be reclaimed
+        # without a full VACUUM. Doesn't seem to take before table creation
+        # but with a manual VACUUM it will take.
+        db.execute("PRAGMA auto_vacuum = INCREMENTAL")
+        db.execute("VACUUM")
         db.commit()
 
     def insert_spot(self, spot: dict) -> bool:
@@ -221,6 +227,9 @@ class SpotDatabase:
                 time.sleep(0.05)
             if total:
                 log.info("Pruned %d spots older than %dh", total, self.max_age_sec // 3600)
+                # Force a checkpoint to move all that deleted space back to the DB
+                with self._conn() as db:
+                    db.execute("PRAGMA wal_checkpoint(PASSIVE)")
             return total
         except Exception as exc:
             log.error("Prune error: %s", exc)
@@ -269,19 +278,24 @@ class SpotDatabase:
 
         try:
             with self._conn() as db:
-                cur = db.execute(sql, params)
+                # Use a context manager for the cursor itself
+                with db.execute(sql, params) as cur:
+                    return cur.fetchall()
                 return cur.fetchall()
         except Exception as exc:
             log.error("Query error: %s", exc)
             return []
 
-    def incremental_vacuum(self, pages: int = 1000) -> None:
+    def incremental_vacuum(self, pages: int = 0) -> None:
         """Reclaim up to `pages` freed pages from the database file.
         Called after pruning to gradually shrink the file without downtime."""
         try:
             with self._conn() as db:
-                db.execute(f"PRAGMA incremental_vacuum({pages})")
-                db.commit()
+                before = db.execute("PRAGMA freelist_count;").fetchone()[0]
+                db.execute(f"PRAGMA incremental_vacuum({pages});")
+                kb_used = (before * 4096) / 1024
+                log.info(f"freelist {before} pages, (~{kb_used} KB)")
+
         except Exception as exc:
             log.error("Incremental vacuum error: %s", exc)
 
