@@ -1,0 +1,10 @@
+# empty lines and lines beginning with a # are ignored. Note that comments within lines are not ignored
+
+# temp for development
+vim
+sqlite3
+
+# packages required by pskr-mqtt-cache
+ca-certificates
+libsqlite3-0
+python3
