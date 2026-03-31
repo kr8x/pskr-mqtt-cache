@@ -270,11 +270,11 @@ class SpotDatabase:
 
         if ofgrid:
             sql += " AND s_grid LIKE ?"
-            params.append(bygrid.upper() + "%")
+            params.append(ofgrid.upper() + "%")
 
         if bygrid:
             sql += " AND r_grid LIKE ?"
-            params.append(ofgrid.upper() + "%")
+            params.append(bygrid.upper() + "%")
 
         if ofcall:
             sql += " AND s_call = ?"
