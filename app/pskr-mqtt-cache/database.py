@@ -251,10 +251,10 @@ class SpotDatabase:
         """
         Query spots by grid prefix, callsign, and maxage.
 
-        bygrid  — sender grid prefix (s_grid LIKE 'XX00%')
-        ofgrid  — receiver grid prefix (r_grid LIKE 'XX00%')
-        bycall  — sender callsign exact match (s_call = ?)
-        ofcall  — receiver callsign exact match (r_call = ?)
+        ofgrid  — sender grid prefix (s_grid LIKE 'XX00%')
+        bygrid  — receiver grid prefix (r_grid LIKE 'XX00%')
+        ofcall  — sender callsign exact match (s_call = ?)
+        bycall  — receiver callsign exact match (r_call = ?)
         maxage  — seconds back from now
 
         Returns list of tuples: (t, s_grid, s_call, r_grid, r_call, mode, freq, snr)
@@ -268,21 +268,21 @@ class SpotDatabase:
         """
         params = [cutoff]
 
-        if bygrid:
-            sql += " AND s_grid LIKE ?"
-            params.append(bygrid.upper() + "%")
-
         if ofgrid:
-            sql += " AND r_grid LIKE ?"
+            sql += " AND s_grid LIKE ?"
             params.append(ofgrid.upper() + "%")
 
-        if bycall:
-            sql += " AND r_call = ?"
-            params.append(bycall.upper())
+        if bygrid:
+            sql += " AND r_grid LIKE ?"
+            params.append(bygrid.upper() + "%")
 
         if ofcall:
             sql += " AND s_call = ?"
             params.append(ofcall.upper())
+
+        if bycall:
+            sql += " AND r_call = ?"
+            params.append(bycall.upper())
 
         sql += " ORDER BY t DESC"
 
