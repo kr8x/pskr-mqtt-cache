@@ -78,7 +78,7 @@ class SpotSubscriber:
     def _on_message(self, client, userdata, msg):
         try:
             spot = orjson.loads(msg.payload)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as exc:
             log.debug("Bad payload: %s", exc)
             return
 

@@ -55,6 +55,11 @@ class SpotDatabase:
         # NORMAL sync is safe with WAL and much faster than FULL
         db.execute("PRAGMA synchronous=NORMAL")
 
+        # CRITICAL: This allows LIKE 'ABC%' to use indexes. 
+        # Since we store data in UPPER case, this makes grid queries 
+        # O(log N) instead of O(N).
+        db.execute("PRAGMA case_sensitive_like = ON")
+
         db.execute("PRAGMA temp_store=MEMORY")
         db.execute(f"PRAGMA cache_size=-{self.cache_size_kb}")
 
@@ -98,17 +103,15 @@ class SpotDatabase:
             )
         """)
 
-        # Indexes for the two HamClock query patterns
-        db.execute("CREATE INDEX IF NOT EXISTS idx_r_grid ON spots(r_grid)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_s_grid ON spots(s_grid)")
-
-        # Index on t for pruning and maxage filtering
+        # Composite indexes: filter by grid/call AND time in a single pass.
+        # These are significantly more efficient for the HamClock query pattern.
+        db.execute("CREATE INDEX IF NOT EXISTS idx_r_grid_t ON spots(r_grid, t)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_s_grid_t ON spots(s_grid, t)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_r_call_t ON spots(r_call, t)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_s_call_t ON spots(s_call, t)")
+        
+        # Standalone index for the Pruner
         db.execute("CREATE INDEX IF NOT EXISTS idx_t ON spots(t)")
-
-        # Indexes for callsign queries
-        db.execute("CREATE INDEX IF NOT EXISTS idx_r_call ON spots(r_call)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_s_call ON spots(s_call)")
-
         db.commit()
 
         # Enable incremental auto_vacuum so freed pages can be reclaimed

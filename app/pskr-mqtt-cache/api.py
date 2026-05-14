@@ -123,11 +123,14 @@ def get_spots(
         ofcall=ofcall or "",
         maxage=maxage,
     )
+    
+    # Optimization: Use positional indexing instead of column names.
+    # sqlite3.Row access by name is slow in tight loops.
+    # Order: t[0], s_grid[1], s_call[2], r_grid[3], r_call[4], mode[5], freq[6], snr[7]
+    lines = []
+    for r in rows:
+        lines.append(f"{r[0]},{r[1]},{r[2][:10]},{r[3]},{r[4][:10]},{r[5]},{r[6]},{r[7]}")
 
-    lines = [
-        f"{r['t']},{r['s_grid']},{r['s_call'][:10]},{r['r_grid']},{r['r_call'][:10]},{r['mode']},{r['freq']},{r['snr']}"
-        for r in rows
-    ]
     return PlainTextResponse("\n".join(lines) + "\n" if lines else "")
 
 
