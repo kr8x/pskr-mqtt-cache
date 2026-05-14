@@ -64,6 +64,11 @@ class SpotDatabase:
         # Force the WAL to truncate to 4MB after a successful checkpoint
         db.execute("PRAGMA journal_size_limit = 4194304")
 
+        # Use memory-mapped I/O. 2GB is a safe starting point for your Xeon.
+        # This significantly reduces CPU cycles spent on I/O.
+        mmap_size = 2 * 1024 * 1024 * 1024
+        db.execute(f"PRAGMA mmap_size={mmap_size}")
+
         return db
 
     @contextmanager
