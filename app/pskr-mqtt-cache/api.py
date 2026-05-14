@@ -40,6 +40,10 @@ _db: SpotDatabase | None = None
 _cfg: APIConfig | None   = None
 _subscriber              = None   # SpotSubscriber — imported lazily to avoid circular
 
+# Cache for expensive DB stats
+_cached_db_stats = {"total": 0, "oldest": None, "newest": None, "timestamp": 0}
+_CACHE_TTL_SEC   = 5 # Cache for 5 seconds
+
 GRID_RE = re.compile(r'^[A-Ra-r]{2}[0-9]{2}([A-Xa-x]{2})?$')
 
 app = FastAPI(
@@ -123,11 +127,14 @@ def get_spots(
         ofcall=ofcall or "",
         maxage=maxage,
     )
+    
+    # Optimization: Use positional indexing instead of column names.
+    # sqlite3.Row access by name is slow in tight loops.
+    # Order: t[0], s_grid[1], s_call[2], r_grid[3], r_call[4], mode[5], freq[6], snr[7]
+    lines = []
+    for r in rows:
+        lines.append(f"{r[0]},{r[1]},{r[2][:10]},{r[3]},{r[4][:10]},{r[5]},{r[6]},{r[7]}")
 
-    lines = [
-        f"{r['t']},{r['s_grid']},{r['s_call'][:10]},{r['r_grid']},{r['r_call'][:10]},{r['mode']},{r['freq']},{r['snr']}"
-        for r in rows
-    ]
     return PlainTextResponse("\n".join(lines) + "\n" if lines else "")
 
 
@@ -139,8 +146,15 @@ def get_status(
     db: SpotDatabase = Depends(get_db),
     _auth            = Depends(check_api_key),
 ):
-    total          = db.count()
-    oldest, newest = db.oldest_newest()
+    global _cached_db_stats
+
+    # Use cached stats if recent enough
+    if (time.time() - _cached_db_stats["timestamp"]) > _CACHE_TTL_SEC:
+        _cached_db_stats["total"]   = db.count()
+        _cached_db_stats["oldest"], _cached_db_stats["newest"] = db.oldest_newest()
+        _cached_db_stats["timestamp"] = time.time()
+
+    total, oldest, newest = _cached_db_stats["total"], _cached_db_stats["oldest"], _cached_db_stats["newest"]
 
     status = {
         "status":       "ok",

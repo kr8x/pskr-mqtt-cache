@@ -55,6 +55,11 @@ class SpotDatabase:
         # NORMAL sync is safe with WAL and much faster than FULL
         db.execute("PRAGMA synchronous=NORMAL")
 
+        # CRITICAL: This allows LIKE 'ABC%' to use indexes. 
+        # Since we store data in UPPER case, this makes grid queries 
+        # O(log N) instead of O(N).
+        db.execute("PRAGMA case_sensitive_like = ON")
+
         db.execute("PRAGMA temp_store=MEMORY")
         db.execute(f"PRAGMA cache_size=-{self.cache_size_kb}")
 
@@ -63,6 +68,11 @@ class SpotDatabase:
 
         # Force the WAL to truncate to 4MB after a successful checkpoint
         db.execute("PRAGMA journal_size_limit = 4194304")
+
+        # Use memory-mapped I/O. 2GB is a safe starting point for your Xeon.
+        # This significantly reduces CPU cycles spent on I/O.
+        mmap_size = 2 * 1024 * 1024 * 1024
+        db.execute(f"PRAGMA mmap_size={mmap_size}")
 
         return db
 
@@ -93,17 +103,15 @@ class SpotDatabase:
             )
         """)
 
-        # Indexes for the two HamClock query patterns
-        db.execute("CREATE INDEX IF NOT EXISTS idx_r_grid ON spots(r_grid)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_s_grid ON spots(s_grid)")
-
-        # Index on t for pruning and maxage filtering
+        # Composite indexes: filter by grid/call AND time in a single pass.
+        # These are significantly more efficient for the HamClock query pattern.
+        db.execute("CREATE INDEX IF NOT EXISTS idx_r_grid_t ON spots(r_grid, t)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_s_grid_t ON spots(s_grid, t)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_r_call_t ON spots(r_call, t)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_s_call_t ON spots(s_call, t)")
+        
+        # Standalone index for the Pruner
         db.execute("CREATE INDEX IF NOT EXISTS idx_t ON spots(t)")
-
-        # Indexes for callsign queries
-        db.execute("CREATE INDEX IF NOT EXISTS idx_r_call ON spots(r_call)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_s_call ON spots(s_call)")
-
         db.commit()
 
         # Enable incremental auto_vacuum so freed pages can be reclaimed
@@ -240,10 +248,10 @@ class SpotDatabase:
                     # incremental_vacuum can reclaim the space. It does not block readers.
                     # We'll use NORMAL to be less aggressive but still make some happen
                     res = db.execute("PRAGMA wal_checkpoint(NORMAL)").fetchone()
-                    if res and res[2] > 0:
+                    if res and res[2] > 0: # res[2] is the number of pages checkpointed
                         log.info("Checkpointed %d pages from WAL to main database.", res[2])
                     else:
-                        log.info("WAL checkpoint ran, but no pages were moved (busy=%s, log=%s, checkpointed=%s).", res[0], res[1], res[2])
+                        log.info("WAL checkpoint ran, but no pages were moved (busy=%s, log=%s, checkpointed=%s).", res[0], res[1], res[2]) # res[0]=busy, res[1]=log, res[2]=checkpointed
             return total
         except Exception as exc:
             log.error("Prune error: %s", exc)

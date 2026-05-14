@@ -16,7 +16,7 @@ committing every spot individually.
 Runs in its own thread. Reconnects automatically on disconnect.
 """
 
-import json
+import orjson
 import time
 import logging
 import threading
@@ -77,8 +77,8 @@ class SpotSubscriber:
 
     def _on_message(self, client, userdata, msg):
         try:
-            spot = json.loads(msg.payload)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            spot = orjson.loads(msg.payload)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as exc:
             log.debug("Bad payload: %s", exc)
             return
 
@@ -100,8 +100,8 @@ class SpotSubscriber:
 
         # Periodic stats log
         if self.spots_received % 10000 == 0:
-            log.info("Stats: received=%d inserted=%d db_total=%d",
-                     self.spots_received, self.spots_inserted, self.db.count())
+            log.info("Stats: received=%d inserted=%d",
+                     self.spots_received, self.spots_inserted)
 
     # ── Batch Flush ───────────────────────────────────────────────────────────
 
