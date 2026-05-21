@@ -30,27 +30,30 @@ class Pruner:
 
     def _run(self):
         log.info("Pruner started (interval=%ds)", self.interval)
-        # Prune immediately on startup to clean stale data from volume.
-        # No need to pause flush thread here — it hasn't built up a backlog yet.
-        self.db.prune()
-        self.db.incremental_vacuum()
+        first_run = True
         while self._running:
-            if self._stop_event.wait(self.interval):
-                break
             if self._running:
-                # Pause the flush thread so pruner can acquire the write lock.
-                # Without this, the flush thread's BEGIN IMMEDIATE every 15s
-                # starves the pruner indefinitely.
-                if self.subscriber:
-                    self.subscriber.pause_for_prune()
-                    time.sleep(0.2)   # let any in-flight flush commit finish
+                paused = False
                 try:
+                    # Skip pause on startup — flush thread has no backlog yet
+                    # and pausing risks OOM if startup prune takes a long time
+                    if self.subscriber and not first_run:
+                        self.subscriber.pause_for_prune()
+                        paused = True
+                        time.sleep(0.5)
                     self.db.prune()
                     self.db.incremental_vacuum()
+                except Exception as exc:
+                    log.error("Pruner error: %s", exc)
                 finally:
-                    # Always resume even if prune raised an exception
-                    if self.subscriber:
-                        self.subscriber.resume_after_prune()
+                    if paused and self.subscriber:
+                        try:
+                            self.subscriber.resume_after_prune()
+                        except Exception as exc:
+                            log.error("Failed to resume flush thread: %s", exc)
+                first_run = False
+            if self._stop_event.wait(self.interval):
+                break
 
     def start(self):
         self._running = True
