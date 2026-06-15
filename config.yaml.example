@@ -12,18 +12,13 @@ mqtt:
   # topic is a list or string
   # format pskr/filter/v2/band/mode/sc/rc/sl/rl/sa/ra
   # string value for full firehose
-  #topic: "pskr/filter/v2/#"   # full firehose
+  topic: "pskr/filter/v2/#"   # full firehose
   # list values for grid and call filters on server, e.g. EM13, KR8X
   #topic:
   #  - "pskr/filter/v2/+/+/+/+/EM13/#"
   #  - "pskr/filter/v2/+/+/+/+/+/EM13/#"  
   #  - "pskr/filter/v2/+/+/KR8X/+/+/#"
   #  - "pskr/filter/v2/+/+/+/KR8X/+/+/#"    
-  topic:
-    - "pskr/filter/v2/+/+/+/+/EM13/#"
-    - "pskr/filter/v2/+/+/+/+/+/EM13/#"  
-    - "pskr/filter/v2/+/+/KR8X/+/+/#"
-    - "pskr/filter/v2/+/+/+/KR8X/+/+/#"     
   client_id: "pskr-mqtt-cache"
   keepalive: 60
   reconnect_delay: 5   # seconds between reconnect attempts
